@@ -1,0 +1,40 @@
+---
+# The checks from the post (pvscan, vgdisplay, df), as assertions. Read-only.
+- name: Verify the expanded volume group and filesystem
+  hosts: lvm_hosts
+  become: true
+  tasks:
+    - name: List the physical volumes (pvscan)
+      ansible.builtin.command:
+        cmd: pvs --noheadings --options pv_name,vg_name
+      register: verify_pvs
+      changed_when: false
+
+    - name: Read the LV size and the free space in the VG
+      ansible.builtin.command:
+        cmd: "lvs --noheadings --units b --nosuffix --options lv_size,vg_free {{ lvm_expand_vg }}/{{ lvm_expand_lv }}"
+      register: verify_lvs
+      changed_when: false
+
+    - name: Read the filesystem size (df)
+      ansible.builtin.command:
+        cmd: "findmnt --noheadings --bytes --output SIZE,SOURCE --target {{ lvm_demo_mount }}"
+      register: verify_df
+      changed_when: false
+      when: lvm_demo_enabled | bool
+
+    - name: Assert that every new disk is in the VG and the filesystem uses the LV
+      vars:
+        verify_members: "{{ verify_pvs.stdout_lines | map('split') | selectattr('1', 'defined') | selectattr('1', 'eq', lvm_expand_vg) | map('first') | list }}"
+        verify_lv_bytes: "{{ verify_lvs.stdout.split()[0] | int }}"
+      ansible.builtin.assert:
+        that:
+          - lvm_expand_disks | difference(verify_members) | length == 0
+          - not (lvm_demo_enabled | bool) or (verify_df.stdout.split()[0] | int) > (verify_lv_bytes | int) * 0.95
+        quiet: true
+
+    - name: Show the result
+      vars:
+        verify_values: "{{ verify_lvs.stdout.split() | map('int') | map('human_readable') | list }}"
+      ansible.builtin.debug:
+        msg: "LV {{ lvm_expand_vg }}/{{ lvm_expand_lv }}: {{ verify_values[0] }}, free in VG: {{ verify_values[1] }}"

@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and adjust. Never commit real values.
+proxmox_endpoint  = "https://pve.example.com:8006/"
+proxmox_api_token = "terraform@pve!blog=00000000-0000-0000-0000-000000000000"
+node_name         = "pve"
+datastore_id      = "local-lvm"
+gateway           = "10.0.10.1"
+dns_servers       = ["10.0.10.1"]
+ssh_public_key    = "ssh-ed25519 AAAA... you@example.com"
+
+vms = {
+  lvm01 = {
+    addresses = ["10.0.10.31/24"]
+    # sdb: the practice volume group; sdc: the new disk that is added to it.
+    data_disks = [10, 50]
+    groups     = ["lvm_hosts"]
+  }
+}

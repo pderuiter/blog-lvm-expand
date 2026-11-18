@@ -1,0 +1,16 @@
+---
+# Volume group to extend (step 3 of the post: check with vgdisplay).
+lvm_expand_vg: ubuntu-vg
+
+# New, empty disks to add to the volume group (steps 1, 2 and 4).
+lvm_expand_disks:
+  - /dev/sdc
+
+# Remove old signatures and partition tables from the new disks first (wipefs --all --backup).
+# Off by default: only enable it for disks you know are meant to be wiped.
+lvm_expand_wipe: false
+
+# Logical volume to grow and its new size (step 5). Either an absolute size such as "40g",
+# or "+100%FREE" for all free space in the volume group. The filesystem is resized with it (step 6).
+lvm_expand_lv: lv_var
+lvm_expand_lv_size: "+100%FREE"

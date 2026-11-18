@@ -1,0 +1,66 @@
+---
+- name: Install LVM tools
+  ansible.builtin.apt:
+    name: lvm2
+    state: present
+
+# Step 1: the disks must exist and must not be partitioned or in use. A disk counts as empty
+# when lsblk shows a single line with no filesystem type or signature.
+- name: Read the current signatures on the new disks
+  ansible.builtin.command:
+    cmd: "lsblk --noheadings --output NAME,FSTYPE,TYPE {{ item }}"
+  loop: "{{ lvm_expand_disks }}"
+  register: lvm_expand_lsblk
+  changed_when: false
+
+- name: Read the current physical volumes
+  ansible.builtin.command:
+    cmd: "pvs --noheadings --separator : --options pv_name,vg_name"
+  register: lvm_expand_pvs
+  changed_when: false
+
+- name: Sort the new disks into members of the VG, members of another VG and empty disks
+  ansible.builtin.set_fact:
+    lvm_expand_pv_vg: "{{ dict(lvm_expand_pvs.stdout_lines | map('trim') | map('split', ':')) }}"
+    lvm_expand_empty: >-
+      {{ lvm_expand_lsblk.results
+         | selectattr('stdout', 'match', '^ *[^ ]+ +disk *$')
+         | map(attribute='item') | list }}
+
+- name: Wipe old signatures and partition tables (wipefs --all --backup)
+  ansible.builtin.command:
+    cmd: "wipefs --all --backup {{ item }}"
+    chdir: /root
+  loop: "{{ lvm_expand_disks }}"
+  when:
+    - lvm_expand_wipe | bool
+    - item not in lvm_expand_pv_vg
+    - item not in lvm_expand_empty
+  changed_when: true
+
+- name: Check that the new disks are empty or already in the volume group
+  ansible.builtin.assert:
+    that: >-
+      lvm_expand_pv_vg[item] | default('') == lvm_expand_vg
+      or item in lvm_expand_empty
+      or (lvm_expand_wipe | bool and item not in lvm_expand_pv_vg)
+    fail_msg: "{{ item }} has partitions, a signature or belongs to another VG. Clean it up or set lvm_expand_wipe: true."
+    quiet: true
+  loop: "{{ lvm_expand_disks }}"
+
+# Steps 2 and 4: pvcreate and vgextend.
+- name: Extend the volume group with the new disks
+  community.general.lvg:
+    vg: "{{ lvm_expand_vg }}"
+    pvs: "{{ lvm_expand_disks }}"
+    remove_extra_pvs: false
+    state: present
+
+# Steps 5 and 6: lvextend and resize2fs.
+- name: Grow the logical volume and its filesystem
+  community.general.lvol:
+    vg: "{{ lvm_expand_vg }}"
+    lv: "{{ lvm_expand_lv }}"
+    size: "{{ lvm_expand_lv_size }}"
+    resizefs: true
+    shrink: false
